@@ -24,16 +24,43 @@ try {
         echo "users.email_verified column check completed.\n";
     }
 
-    // Create email_verification table
-    echo "Creating email_verification table...\n";
-    $conn->exec("CREATE TABLE IF NOT EXISTS `email_verification` (
+    // Alter users table to add google_id and auth_provider
+    try {
+        $conn->exec("ALTER TABLE users ADD COLUMN google_id VARCHAR(255) NULL");
+        echo "Added google_id column to users table.\n";
+    } catch (Exception $e) {
+        echo "users.google_id column check completed.\n";
+    }
+
+    try {
+        $conn->exec("ALTER TABLE users ADD COLUMN auth_provider VARCHAR(50) DEFAULT 'local'");
+        echo "Added auth_provider column to users table.\n";
+    } catch (Exception $e) {
+        echo "users.auth_provider column check completed.\n";
+    }
+
+    // Drop old email_verification table if exists
+    try {
+        $conn->exec("DROP TABLE IF EXISTS `email_verification`");
+        echo "Dropped old email_verification table.\n";
+    } catch (Exception $e) {
+        echo "No old email_verification table to drop.\n";
+    }
+
+    // Create email_verifications table
+    echo "Creating email_verifications table...\n";
+    $conn->exec("CREATE TABLE IF NOT EXISTS `email_verifications` (
         `id` INT AUTO_INCREMENT PRIMARY KEY,
+        `user_id` INT NULL,
         `email` VARCHAR(255) NOT NULL UNIQUE,
         `otp` VARCHAR(6) NOT NULL,
+        `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        `expires_at` TIMESTAMP NULL,
+        `verified` TINYINT(1) DEFAULT 0,
+        `resend_count` INT DEFAULT 0,
         `attempts` INT DEFAULT 0,
-        `resends` INT DEFAULT 0,
         `last_resend_at` TIMESTAMP NULL,
-        `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
     )");
 
     // Create registration_rate_limit table
@@ -373,7 +400,14 @@ try {
         'design_sticky_header' => ['1', 'Design'],
         'design_favicon_url' => ['/favicon.ico', 'Design'],
         'design_site_name' => ['Yuvalay MakerSpace', 'Design'],
-        'design_tagline' => ['Empowering Makers. Building a Better Tomorrow.', 'Design']
+        'design_tagline' => ['Empowering Makers. Building a Better Tomorrow.', 'Design'],
+        'smtp_host' => ['smtp.gmail.com', 'SMTP'],
+        'smtp_port' => ['587', 'SMTP'],
+        'smtp_secure' => ['tls', 'SMTP'],
+        'smtp_username' => ['', 'SMTP'],
+        'smtp_password' => ['', 'SMTP'],
+        'google_client_id' => ['', 'Google'],
+        'google_client_secret' => ['', 'Google']
     ];
     $ins = $conn->prepare("INSERT INTO site_settings (setting_key, setting_value, category) VALUES (:key, :val, :cat) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)");
     foreach ($designs as $key => $info) {

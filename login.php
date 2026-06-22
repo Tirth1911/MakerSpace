@@ -70,7 +70,10 @@ $redirect = $_GET['redirect'] ?? '/my-registrations.php';
         </button>
       </form>
 
-      <!-- Google login mock -->
+      <!-- Google Identity Services SDK -->
+      <script src="https://accounts.google.com/gsi/client" async defer></script>
+      
+      <!-- Google login -->
       <div class="space-y-4">
         <div class="relative flex py-2 items-center">
             <div class="flex-grow border-t border-white/5"></div>
@@ -78,9 +81,23 @@ $redirect = $_GET['redirect'] ?? '/my-registrations.php';
             <div class="flex-grow border-t border-white/5"></div>
         </div>
 
-        <button onclick="mockGoogleLogin()" class="w-full text-center py-3 bg-brandBlack hover:bg-white/5 border border-white/10 rounded-xl text-gray-300 hover:text-white font-semibold text-xs transition-all flex items-center justify-center gap-2">
-          <i class="fa-brands fa-google text-sm"></i> Google Authentication
-        </button>
+        <div id="g_id_onload"
+             data-client_id="<?php echo htmlspecialchars(getSetting('google_client_id', '')); ?>"
+             data-callback="handleCredentialResponse"
+             data-auto_select="true"
+             data-itp_support="true">
+        </div>
+        <div class="flex justify-center w-full">
+            <div class="g_id_signin"
+                 data-type="standard"
+                 data-shape="rectangular"
+                 data-theme="dark"
+                 data-text="signin_with"
+                 data-size="large"
+                 data-logo_alignment="left"
+                 data-width="320">
+            </div>
+        </div>
       </div>
 
       <div class="text-center text-xs text-gray-500 pt-2 border-t border-white/5">
@@ -128,8 +145,47 @@ $redirect = $_GET['redirect'] ?? '/my-registrations.php';
         });
     }
 
-    function mockGoogleLogin() {
-        alert("Google Oauth login flows would configure client redirects here in production.");
+    function handleCredentialResponse(response) {
+        const errDiv = document.getElementById("loginError");
+        errDiv.classList.add("hidden");
+        
+        // Remove existing loader if any
+        const existingLoader = document.getElementById("googleLoginLoader");
+        if (existingLoader) existingLoader.remove();
+        
+        // Show loading state
+        const loader = document.createElement("div");
+        loader.id = "googleLoginLoader";
+        loader.className = "flex items-center justify-center gap-2 p-3.5 bg-brandGreen/10 border border-brandGreen/25 text-brandGreen text-xs font-semibold rounded-xl";
+        loader.innerHTML = '<i class="fa-solid fa-spinner animate-spin"></i> Authenticating with Google, please wait...';
+        errDiv.parentNode.insertBefore(loader, errDiv.nextSibling);
+
+        const formData = new FormData();
+        formData.append("id_token", response.credential);
+
+        fetch("/api.php?action=google-login", {
+            method: "POST",
+            body: formData
+        })
+        .then(res => res.json())
+        .then(data => {
+            const l = document.getElementById("googleLoginLoader");
+            if (l) l.remove();
+            
+            if (data.status === "success") {
+                window.location.href = data.redirect || "/my-registrations.php";
+            } else {
+                errDiv.innerText = data.message;
+                errDiv.classList.remove("hidden");
+            }
+        })
+        .catch(err => {
+            console.error(err);
+            const l = document.getElementById("googleLoginLoader");
+            if (l) l.remove();
+            errDiv.innerText = "Connection to authentication server failed. Please try again.";
+            errDiv.classList.remove("hidden");
+        });
     }
 </script>
 

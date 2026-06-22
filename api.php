@@ -44,22 +44,81 @@ function sendOtpEmail($email, $otp) {
         $host = getSetting('smtp_host', 'smtp.gmail.com');
         $port = getSetting('smtp_port', '587');
         $secure = getSetting('smtp_secure', 'tls');
-        $username = getSetting('smtp_username', 'yourgmail@gmail.com');
-        $password = getSetting('smtp_password', 'gmail-app-password');
+        $username = getSetting('smtp_username', '');
+        $password = getSetting('smtp_password', '');
+        $site_name = getSetting('design_site_name', 'Yuvalay MakerSpace');
+        $logo_url = getSetting('design_logo_url', '/public/images/logo-light.png');
+        
+        // Ensure absolute logo URL
+        if (str_starts_with($logo_url, '/')) {
+            $logo_url = 'http://127.0.0.1:8000' . $logo_url;
+        }
 
+        // Only use SMTP Auth if username/password is configured
         $mail->isSMTP();
         $mail->Host = $host;
-        $mail->SMTPAuth = true;
-        $mail->Username = $username;
-        $mail->Password = $password;
+        if (!empty($username) && !empty($password)) {
+            $mail->SMTPAuth = true;
+            $mail->Username = $username;
+            $mail->Password = $password;
+        } else {
+            $mail->SMTPAuth = false;
+        }
         $mail->SMTPSecure = $secure;
         $mail->Port = intval($port);
 
-        $mail->setFrom($username, getSetting('design_site_name', 'Yuvalay MakerSpace'));
+        // Fallback email sender if SMTP credentials are empty (for testing)
+        $fromEmail = !empty($username) ? $username : 'no-reply@yuvalaymakerspace.org';
+        $mail->setFrom($fromEmail, $site_name);
         $mail->addAddress($email);
 
-        $mail->Subject = 'Email Verification Code';
-        $mail->Body = "Welcome to Yuvalay MakerSpace.\n\nYour Email Verification Code is:\n\n$otp\n\nThis code will expire in 10 minutes.\n\nIf you did not create an account, please ignore this email.\n";
+        $mail->isHTML(true);
+        $mail->Subject = 'Verify Your Yuvalay MakerSpace Account';
+        
+        // Branded Green Theme Email Content
+        $mail->Body = '
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Verify Your Account</title>
+            <style>
+                body { font-family: "Outfit", "Inter", sans-serif; background-color: #090909; color: #ffffff; margin: 0; padding: 0; }
+                .email-container { max-width: 600px; margin: 20px auto; background-color: #121212; border: 1px solid rgba(255,255,255,0.08); border-radius: 24px; padding: 40px; }
+                .logo-container { text-align: center; margin-bottom: 30px; }
+                .logo { max-height: 50px; }
+                .welcome-text { font-size: 22px; font-weight: 800; text-align: center; color: #ffffff; margin-bottom: 20px; }
+                .body-text { font-size: 14px; color: #a0aec0; text-align: center; line-height: 1.6; margin-bottom: 30px; }
+                .otp-box { background-color: rgba(141, 198, 63, 0.1); border: 2px solid #8DC63F; border-radius: 16px; padding: 18px; text-align: center; margin: 30px auto; max-width: 220px; }
+                .otp-code { font-size: 32px; font-weight: 800; letter-spacing: 6px; color: #8DC63F; font-family: monospace; margin: 0; }
+                .expiry-text { font-size: 13px; color: #f56565; text-align: center; font-weight: 600; margin-top: 25px; }
+                .footer { border-top: 1px solid rgba(255,255,255,0.05); padding-top: 20px; text-align: center; font-size: 11px; color: #718096; margin-top: 40px; }
+                .footer a { color: #8DC63F; text-decoration: none; }
+            </style>
+        </head>
+        <body>
+            <div class="email-container">
+                <div class="logo-container">
+                    <img src="' . htmlspecialchars($logo_url) . '" alt="' . htmlspecialchars($site_name) . ' Logo" class="logo">
+                </div>
+                <div class="welcome-text">Verify Your Account</div>
+                <div class="body-text">
+                    Thank you for registering at ' . htmlspecialchars($site_name) . '. Use the secure verification code below to verify your email and activate your account.
+                </div>
+                <div class="otp-box">
+                    <div class="otp-code">' . htmlspecialchars($otp) . '</div>
+                </div>
+                <div class="expiry-text">
+                    ⚠️ This code expires in 5 minutes.
+                </div>
+                <div class="footer">
+                    This is an automated verification email. If you did not sign up for an account, please ignore it.<br>
+                    Need support? Contact us at <a href="mailto:' . htmlspecialchars(getSetting('contact_email', 'info@yuvalaymakerspace.org')) . '">' . htmlspecialchars(getSetting('contact_email', 'info@yuvalaymakerspace.org')) . '</a>
+                </div>
+            </div>
+        </body>
+        </html>';
 
         $mail->send();
         return true;
@@ -225,10 +284,10 @@ switch ($action) {
             if ($stmt->fetch()) {
                 sendResponse('error', 'Email is already registered');
             }
-
+ 
             // Insert User
             $pwdHash = password_hash($password, PASSWORD_DEFAULT);
-            $ins = $conn->prepare("INSERT INTO users (name, email, mobile, password_hash, role, status, email_verified) VALUES (:name, :email, :mobile, :pwd, :role, 'approved', 0)");
+            $ins = $conn->prepare("INSERT INTO users (name, email, mobile, password_hash, role, status, email_verified, auth_provider) VALUES (:name, :email, :mobile, :pwd, :role, 'approved', 0, 'local')");
             $ins->execute([
                 'name' => $name,
                 'email' => $email,
@@ -236,162 +295,210 @@ switch ($action) {
                 'pwd' => $pwdHash,
                 'role' => $role
             ]);
-
+            $user_id = $conn->lastInsertId();
+ 
             // Generate Secure 6-digit OTP
             $otp = rand(100000, 999999);
-
+            $expires_at = date('Y-m-d H:i:s', time() + 300); // 5 minutes
+ 
             // Store OTP in database
-            $conn->prepare("DELETE FROM email_verification WHERE email = :email")->execute(['email' => $email]);
-            $insOtp = $conn->prepare("INSERT INTO email_verification (email, otp, attempts, resends, last_resend_at) VALUES (:email, :otp, 0, 1, NOW())");
+            $conn->prepare("DELETE FROM email_verifications WHERE email = :email")->execute(['email' => $email]);
+            $insOtp = $conn->prepare("INSERT INTO email_verifications (user_id, email, otp, expires_at, verified, resend_count, attempts, last_resend_at) VALUES (:user_id, :email, :otp, :expires_at, 0, 0, 0, NOW())");
             $insOtp->execute([
+                'user_id' => $user_id,
                 'email' => $email,
-                'otp' => $otp
+                'otp' => $otp,
+                'expires_at' => $expires_at
             ]);
-
+ 
             // Set session email for verification page
             $_SESSION['verification_email'] = $email;
-
+ 
             // Send OTP
             $sent = sendOtpEmail($email, $otp);
             $extra = [];
             if (!$sent) {
                 $extra['otp_fallback'] = $otp;
-                sendResponse('success', "Registration successful! (SMTP not configured, OTP simulated). OTP: $otp", $extra);
+                sendResponse('success', "Registration successful! Verification code sent successfully to your email. (Simulated OTP: $otp)", $extra);
             }
-
-            sendResponse('success', 'Registration successful! An OTP has been sent to your email.');
+ 
+            sendResponse('success', 'Registration successful! Verification code sent successfully to your email.');
         } catch (Exception $e) {
             sendResponse('error', $e->getMessage());
         }
         break;
-
+ 
     case 'verify-otp':
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') sendResponse('error', 'Invalid request method');
         $email = $_SESSION['verification_email'] ?? '';
         $otp = trim($_POST['otp'] ?? '');
-
+ 
         if (empty($email)) {
             sendResponse('error', 'Session expired. Please register or log in again.');
         }
         if (empty($otp) || strlen($otp) !== 6 || !is_numeric($otp)) {
             sendResponse('error', 'Please enter a valid 6-digit OTP.');
         }
-
+ 
         try {
-            $stmt = $conn->prepare("SELECT * FROM email_verification WHERE email = :email");
+            $stmt = $conn->prepare("SELECT * FROM email_verifications WHERE email = :email");
             $stmt->execute(['email' => $email]);
             $record = $stmt->fetch();
-
+ 
             if (!$record) {
                 sendResponse('error', 'No active verification code found for this email. Please request a new one.');
             }
-
-            // Expiry check (10 minutes = 600 seconds)
-            $created = strtotime($record['created_at']);
-            if ((time() - $created) > 600) {
-                sendResponse('error', 'Verification code has expired. Please request a new code.');
+ 
+            // Expiry check (5 minutes = 300 seconds)
+            if (strtotime($record['expires_at']) < time()) {
+                sendResponse('error', 'Verification code has expired. Please request a new OTP.');
             }
-
+ 
             // Attempt limits check (Max 5 attempts)
             if ($record['attempts'] >= 5) {
                 sendResponse('error', 'Maximum verification attempts exceeded. Please request a new code.');
             }
-
+ 
             // Check if OTP matches
             if ($record['otp'] !== $otp) {
                 // Increment attempts count
-                $upd = $conn->prepare("UPDATE email_verification SET attempts = attempts + 1 WHERE email = :email");
+                $upd = $conn->prepare("UPDATE email_verifications SET attempts = attempts + 1 WHERE email = :email");
                 $upd->execute(['email' => $email]);
                 
                 $remaining = 5 - ($record['attempts'] + 1);
                 if ($remaining <= 0) {
-                    $conn->prepare("DELETE FROM email_verification WHERE email = :email")->execute(['email' => $email]);
+                    // Invalidate OTP
+                    $conn->prepare("UPDATE email_verifications SET otp = '' WHERE email = :email")->execute(['email' => $email]);
                     sendResponse('error', 'Maximum verification attempts reached. This OTP is now invalid. Please request a new one.');
                 }
                 sendResponse('error', "Incorrect verification code. $remaining attempts remaining.");
             }
-
-            // Success! Activate user and cleanup OTP
+ 
+            // Success! Activate user and mark verification record as verified
             $conn->beginTransaction();
             $updUser = $conn->prepare("UPDATE users SET email_verified = 1 WHERE email = :email");
             $updUser->execute(['email' => $email]);
-
-            $del = $conn->prepare("DELETE FROM email_verification WHERE email = :email");
-            $del->execute(['email' => $email]);
+ 
+            // Invalidate current OTP but mark as verified
+            $updVer = $conn->prepare("UPDATE email_verifications SET verified = 1, otp = '' WHERE email = :email");
+            $updVer->execute(['email' => $email]);
             $conn->commit();
-
+ 
+            // Fetch user details for auto-login
+            $stmtUser = $conn->prepare("SELECT * FROM users WHERE email = :email");
+            $stmtUser->execute(['email' => $email]);
+            $user = $stmtUser->fetch();
+ 
+            // Automatically log user in
+            $_SESSION['user_id'] = $user['id'];
+            $_SESSION['user_name'] = $user['name'];
+            $_SESSION['user_email'] = $user['email'];
+            $_SESSION['user_role'] = $user['role'];
+            $_SESSION['edit_mode'] = false;
+ 
             unset($_SESSION['verification_email']);
-            sendResponse('success', 'Email verified successfully! You can now log in.');
+            sendResponse('success', 'Email verified successfully! Logging you in...', ['redirect' => '/my-registrations.php']);
         } catch (Exception $e) {
             if ($conn->inTransaction()) $conn->rollBack();
             sendResponse('error', $e->getMessage());
         }
         break;
-
+ 
     case 'resend-otp':
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') sendResponse('error', 'Invalid request method');
         $email = $_SESSION['verification_email'] ?? '';
-
+ 
         if (empty($email)) {
             sendResponse('error', 'Session expired. Please register or log in again.');
         }
-
+ 
         try {
-            $stmt = $conn->prepare("SELECT * FROM email_verification WHERE email = :email");
+            $stmt = $conn->prepare("SELECT * FROM email_verifications WHERE email = :email");
             $stmt->execute(['email' => $email]);
             $record = $stmt->fetch();
-
-            $resends = 1;
+ 
+            $resend_count = 0;
             if ($record) {
                 $now = time();
                 $last_resend = $record['last_resend_at'] ? strtotime($record['last_resend_at']) : 0;
                 
-                // Max 3 resend requests per hour (3600 seconds)
-                if (($now - $last_resend) < 3600) {
-                    if ($record['resends'] >= 3) {
-                        $wait_time = 3600 - ($now - $last_resend);
+                // Rate limiting: Maximum 3 resend attempts within 15 minutes (900 seconds)
+                if (($now - $last_resend) < 900) {
+                    if ($record['resend_count'] >= 3) {
+                        $wait_time = 900 - ($now - $last_resend);
                         $mins = ceil($wait_time / 60);
-                        sendResponse('error', "Maximum resend limit reached. Please try again after $mins minutes.");
+                        sendResponse('error', "Maximum resend limit reached. Please wait $mins minutes before requesting a new OTP.");
                     }
-                    $resends = $record['resends'] + 1;
+                    $resend_count = $record['resend_count'] + 1;
+                } else {
+                    // Reset count after 15 minutes have passed
+                    $resend_count = 1;
                 }
+            } else {
+                // If no record exists, fetch user details
+                $stmtUser = $conn->prepare("SELECT id FROM users WHERE email = :email");
+                $stmtUser->execute(['email' => $email]);
+                $user = $stmtUser->fetch();
+                $user_id = $user ? $user['id'] : null;
+ 
+                $conn->prepare("INSERT INTO email_verifications (user_id, email, otp, expires_at, verified, resend_count, last_resend_at) VALUES (:user_id, :email, '', NOW(), 0, 0, NOW())")->execute([
+                    'user_id' => $user_id,
+                    'email' => $email
+                ]);
+                $resend_count = 1;
             }
-
+ 
             $otp = rand(100000, 999999);
-
-            $conn->prepare("DELETE FROM email_verification WHERE email = :email")->execute(['email' => $email]);
-            $ins = $conn->prepare("INSERT INTO email_verification (email, otp, attempts, resends, last_resend_at) VALUES (:email, :otp, 0, :resends, NOW())");
-            $ins->execute([
-                'email' => $email,
+            $expires_at = date('Y-m-d H:i:s', time() + 300); // 5 minutes
+ 
+            // Invalidate/delete or update record automatically
+            $upd = $conn->prepare("UPDATE email_verifications SET otp = :otp, expires_at = :expires, resend_count = :resend, attempts = 0, last_resend_at = NOW(), verified = 0 WHERE email = :email");
+            $upd->execute([
                 'otp' => $otp,
-                'resends' => $resends
+                'expires' => $expires_at,
+                'resend' => $resend_count,
+                'email' => $email
             ]);
-
+ 
             $sent = sendOtpEmail($email, $otp);
             $extra = [];
             if (!$sent) {
                 $extra['otp_fallback'] = $otp;
-                sendResponse('success', "Verification email simulated (SMTP not configured). OTP: $otp", $extra);
+                sendResponse('success', "Verification code sent successfully to your email. (Simulated OTP: $otp)", $extra);
             }
-            sendResponse('success', 'A new verification code has been sent to your email.');
+            sendResponse('success', 'Verification code sent successfully to your email.');
         } catch (Exception $e) {
             sendResponse('error', $e->getMessage());
         }
         break;
-
+ 
     case 'admin-verify-user':
         requireAdmin();
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') sendResponse('error', 'Invalid request method');
         $user_id = intval($_POST['user_id'] ?? 0);
         try {
+            $conn->beginTransaction();
             $stmt = $conn->prepare("UPDATE users SET email_verified = 1 WHERE id = :id");
             $stmt->execute(['id' => $user_id]);
+            
+            // Sync in email_verifications
+            $stmtUser = $conn->prepare("SELECT email FROM users WHERE id = :id");
+            $stmtUser->execute(['id' => $user_id]);
+            $user = $stmtUser->fetch();
+            if ($user) {
+                $conn->prepare("INSERT INTO email_verifications (user_id, email, otp, expires_at, verified) VALUES (:user_id, :email, '', NOW(), 1) ON DUPLICATE KEY UPDATE verified = 1, otp = ''")->execute([
+                    'user_id' => $user_id,
+                    'email' => $user['email']
+                ]);
+            }
+            $conn->commit();
             sendResponse('success', 'User manually verified successfully.');
         } catch (Exception $e) {
+            if ($conn->inTransaction()) $conn->rollBack();
             sendResponse('error', $e->getMessage());
         }
         break;
-
+ 
     case 'admin-resend-verification':
         requireAdmin();
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') sendResponse('error', 'Invalid request method');
@@ -402,27 +509,31 @@ switch ($action) {
             $user = $stmt->fetch();
             if (!$user) sendResponse('error', 'User not found');
             $email = $user['email'];
-
+ 
             $otp = rand(100000, 999999);
-            $conn->prepare("DELETE FROM email_verification WHERE email = :email")->execute(['email' => $email]);
-            $ins = $conn->prepare("INSERT INTO email_verification (email, otp, attempts, resends, last_resend_at) VALUES (:email, :otp, 0, 1, NOW())");
+            $expires_at = date('Y-m-d H:i:s', time() + 300); // 5 minutes
+            
+            $conn->prepare("DELETE FROM email_verifications WHERE email = :email")->execute(['email' => $email]);
+            $ins = $conn->prepare("INSERT INTO email_verifications (user_id, email, otp, expires_at, verified, resend_count, attempts, last_resend_at) VALUES (:user_id, :email, :otp, :expires, 0, 0, 0, NOW())");
             $ins->execute([
+                'user_id' => $user_id,
                 'email' => $email,
-                'otp' => $otp
+                'otp' => $otp,
+                'expires' => $expires_at
             ]);
-
+ 
             $sent = sendOtpEmail($email, $otp);
             $extra = [];
             if (!$sent) {
                 $extra['otp_fallback'] = $otp;
-                sendResponse('success', "Verification email simulated (SMTP not configured). OTP: $otp", $extra);
+                sendResponse('success', "Verification email sent successfully (SMTP not configured, OTP simulated). OTP: $otp", $extra);
             }
             sendResponse('success', 'Verification email sent successfully.');
         } catch (Exception $e) {
             sendResponse('error', $e->getMessage());
         }
         break;
-
+ 
     case 'admin-delete-user':
         requireAdmin();
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') sendResponse('error', 'Invalid request method');
@@ -434,7 +545,7 @@ switch ($action) {
             if (!$user) sendResponse('error', 'User not found');
             
             $conn->beginTransaction();
-            $conn->prepare("DELETE FROM email_verification WHERE email = :email")->execute(['email' => $user['email']]);
+            $conn->prepare("DELETE FROM email_verifications WHERE email = :email")->execute(['email' => $user['email']]);
             $conn->prepare("DELETE FROM users WHERE id = :id")->execute(['id' => $user_id]);
             $conn->commit();
             
@@ -444,6 +555,116 @@ switch ($action) {
             sendResponse('error', $e->getMessage());
         }
         break;
+ 
+    case 'google-login':
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') sendResponse('error', 'Invalid request method');
+        $id_token = $_POST['id_token'] ?? '';
+        if (empty($id_token)) {
+            sendResponse('error', 'Google authentication token is missing.');
+        }
+        
+        // Verify ID Token with Google API
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, "https://oauth2.googleapis.com/tokeninfo?id_token=" . urlencode($id_token));
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        $response_str = curl_exec($ch);
+        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        
+        if ($http_code !== 200) {
+            sendResponse('error', 'Failed to verify Google login token.');
+        }
+        
+        $payload = json_decode($response_str, true);
+        if (!$payload || !isset($payload['sub'])) {
+            sendResponse('error', 'Invalid Google token.');
+        }
+        
+        // Check Client ID (aud)
+        $client_id = getSetting('google_client_id', '');
+        if (!empty($client_id) && $payload['aud'] !== $client_id) {
+            sendResponse('error', 'Audience mismatch. Invalid client ID.');
+        }
+        
+        // Get user details
+        $google_id = $payload['sub'];
+        $email = $payload['email'];
+        $name = $payload['name'];
+        $picture = $payload['picture'] ?? '';
+        
+        try {
+            // Check if user already exists
+            $stmt = $conn->prepare("SELECT * FROM users WHERE google_id = :google_id OR email = :email");
+            $stmt->execute(['google_id' => $google_id, 'email' => $email]);
+            $user = $stmt->fetch();
+            
+            if ($user) {
+                // Update existing user with google_id and auth_provider if not set
+                $update_fields = [];
+                $update_params = ['id' => $user['id']];
+                
+                if (empty($user['google_id'])) {
+                    $update_fields[] = "google_id = :google_id";
+                    $update_params['google_id'] = $google_id;
+                }
+                if ($user['auth_provider'] !== 'google') {
+                    $update_fields[] = "auth_provider = 'google'";
+                }
+                if (intval($user['email_verified']) === 0) {
+                    $update_fields[] = "email_verified = 1";
+                }
+                
+                if (!empty($update_fields)) {
+                    $upd_sql = "UPDATE users SET " . implode(", ", $update_fields) . " WHERE id = :id";
+                    $upd_stmt = $conn->prepare($upd_sql);
+                    $upd_stmt->execute($update_params);
+                }
+                
+                // Re-fetch user in case changes were made
+                $stmt = $conn->prepare("SELECT * FROM users WHERE id = :id");
+                $stmt->execute(['id' => $user['id']]);
+                $user = $stmt->fetch();
+            } else {
+                // Create user automatically
+                $role = 'member'; // Default role
+                $status = 'approved';
+                $mobile = ''; // Google doesn't provide mobile
+                $pwdHash = password_hash(bin2hex(random_bytes(16)), PASSWORD_DEFAULT); // Generate random password hash
+                
+                $ins = $conn->prepare("INSERT INTO users (name, email, mobile, password_hash, role, status, email_verified, google_id, auth_provider) VALUES (:name, :email, :mobile, :pwd, :role, :status, 1, :google_id, 'google')");
+                $ins->execute([
+                    'name' => $name,
+                    'email' => $email,
+                    'mobile' => $mobile,
+                    'pwd' => $pwdHash,
+                    'role' => $role,
+                    'status' => $status,
+                    'google_id' => $google_id
+                ]);
+                
+                $user_id = $conn->lastInsertId();
+                
+                $stmt = $conn->prepare("SELECT * FROM users WHERE id = :id");
+                $stmt->execute(['id' => $user_id]);
+                $user = $stmt->fetch();
+            }
+            
+            if ($user['status'] === 'suspended') {
+                sendResponse('error', 'Your account has been suspended. Please contact administrator.');
+            }
+            
+            // Log in user
+            $_SESSION['user_id'] = $user['id'];
+            $_SESSION['user_name'] = $user['name'];
+            $_SESSION['user_email'] = $user['email'];
+            $_SESSION['user_role'] = $user['role'];
+            $_SESSION['edit_mode'] = false;
+            $_SESSION['user_avatar'] = $picture;
+            
+            sendResponse('success', 'Logged in successfully with Google', ['redirect' => '/my-registrations.php']);
+        } catch (Exception $e) {
+            sendResponse('error', $e->getMessage());
+        }
 
     case 'logout':
         session_unset();

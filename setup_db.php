@@ -101,6 +101,17 @@ try {
         'social_facebook' => ['https://facebook.com/yuvalaymakerspace', 'Social'],
         'social_instagram' => ['https://instagram.com/yuvalaymakerspace', 'Social'],
         'social_linkedin' => ['https://linkedin.com/company/yuvalaymakerspace', 'Social'],
+
+        // SMTP Settings
+        'smtp_host' => ['smtp.gmail.com', 'SMTP'],
+        'smtp_port' => ['587', 'SMTP'],
+        'smtp_secure' => ['tls', 'SMTP'],
+        'smtp_username' => ['', 'SMTP'],
+        'smtp_password' => ['', 'SMTP'],
+
+        // Google OAuth Settings
+        'google_client_id' => ['', 'Google'],
+        'google_client_secret' => ['', 'Google'],
     ];
 
     $insSetting = $pdo->prepare("INSERT INTO site_settings (setting_key, setting_value, category) VALUES (:key, :val, :cat) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)");

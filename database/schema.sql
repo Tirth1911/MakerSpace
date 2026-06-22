@@ -30,6 +30,8 @@ CREATE TABLE IF NOT EXISTS `users` (
   -- Status (Approved/Suspended/Pending)
   `status` ENUM('pending', 'approved', 'suspended') DEFAULT 'approved',
   `email_verified` TINYINT(1) DEFAULT 0,
+  `google_id` VARCHAR(255) NULL,
+  `auth_provider` VARCHAR(50) DEFAULT 'local',
   
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -192,4 +194,21 @@ CREATE TABLE IF NOT EXISTS `custom_pages` (
   `slug` VARCHAR(150) NOT NULL UNIQUE,
   `status` ENUM('draft', 'published') DEFAULT 'published',
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- -----------------------------------------------------
+-- Table `email_verifications`
+-- -----------------------------------------------------
+CREATE TABLE IF NOT EXISTS `email_verifications` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `user_id` INT NULL,
+  `email` VARCHAR(255) NOT NULL UNIQUE,
+  `otp` VARCHAR(6) NOT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `expires_at` TIMESTAMP NULL,
+  `verified` TINYINT(1) DEFAULT 0,
+  `resend_count` INT DEFAULT 0,
+  `attempts` INT DEFAULT 0,
+  `last_resend_at` TIMESTAMP NULL,
+  FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
 );

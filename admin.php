@@ -147,6 +147,9 @@ foreach ($users as $u) {
         <button onclick="switchTab('seo', this)" class="tab-btn px-4 py-3 rounded-xl text-gray-600 hover:text-gray-900 hover:bg-gray-100 flex items-center gap-3 transition-all">
           <i class="fa-solid fa-globe w-5"></i> SEO Desk & Files
         </button>
+        <button onclick="switchTab('settings', this)" class="tab-btn px-4 py-3 rounded-xl text-gray-600 hover:text-gray-900 hover:bg-gray-100 flex items-center gap-3 transition-all">
+          <i class="fa-solid fa-gears w-5"></i> System Settings
+        </button>
       </nav>
     </div>
 
@@ -268,6 +271,7 @@ foreach ($users as $u) {
               <tr>
                 <th class="px-6 py-4">Name</th>
                 <th class="px-6 py-4">Email / Mobile</th>
+                <th class="px-6 py-4">Provider</th>
                 <th class="px-6 py-4">Verified</th>
                 <th class="px-6 py-4">Role Joined</th>
                 <th class="px-6 py-4">Status</th>
@@ -281,6 +285,11 @@ foreach ($users as $u) {
                   <td class="px-6 py-4 text-xs font-mono">
                     <?php echo htmlspecialchars($u['email']); ?><br>
                     <span class="text-gray-400"><?php echo htmlspecialchars($u['mobile']); ?></span>
+                  </td>
+                  <td class="px-6 py-4">
+                    <span class="text-xs <?php echo ($u['auth_provider'] ?? 'local') === 'google' ? 'text-blue-600 bg-blue-50' : 'text-gray-600 bg-gray-100'; ?> px-2.5 py-1 rounded-full font-bold uppercase">
+                      <?php echo htmlspecialchars($u['auth_provider'] ?? 'local'); ?>
+                    </span>
                   </td>
                   <td class="px-6 py-4">
                     <span class="text-xs <?php echo ($u['email_verified'] ?? 0) == 1 ? 'text-green-600 bg-green-50' : 'text-gray-500 bg-gray-100'; ?> px-2.5 py-1 rounded-full font-bold uppercase">
@@ -720,6 +729,97 @@ foreach ($users as $u) {
             <button type="submit" class="px-6 py-3 bg-brandGreen hover:bg-brandDarkGreen text-brandBlack font-extrabold text-xs rounded-xl shadow-lg shadow-brandGreen/20">Save SEO Metadata</button>
           </div>
         </form>
+      </div>
+    </div>
+
+    <!-- TAB: SYSTEM SETTINGS (SMTP & GOOGLE AUTH) -->
+    <div id="tab_settings" class="admin-tab-pane hidden space-y-6">
+      <div class="text-left">
+        <h2 class="text-2xl font-extrabold font-['Outfit'] text-white">System Settings</h2>
+        <p class="text-xs text-gray-500 mt-1">Configure SMTP credentials for Email OTP and Google Client configurations for Google Authentication.</p>
+      </div>
+
+      <form id="systemSettingsForm" onsubmit="saveSystemSettings(event)" class="glass p-8 rounded-3xl border border-white/5 space-y-6 text-left">
+        
+        <!-- SMTP Config -->
+        <div class="space-y-4">
+          <h3 class="text-sm font-bold uppercase tracking-wider text-[#8DC63F] border-b border-white/5 pb-2">SMTP Mail Server Configuration</h3>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div>
+              <label class="block text-gray-400 font-semibold mb-1 text-xs">SMTP Host</label>
+              <input type="text" name="smtp_host" class="w-full bg-brandBlack border border-white/10 rounded-xl px-3 py-2.5 text-white text-xs focus:outline-none focus:border-brandGreen" value="<?php echo htmlspecialchars(getSetting('smtp_host', 'smtp.gmail.com')); ?>">
+            </div>
+            <div>
+              <label class="block text-gray-400 font-semibold mb-1 text-xs">SMTP Port</label>
+              <input type="text" name="smtp_port" class="w-full bg-brandBlack border border-white/10 rounded-xl px-3 py-2.5 text-white text-xs focus:outline-none focus:border-brandGreen" value="<?php echo htmlspecialchars(getSetting('smtp_port', '587')); ?>">
+            </div>
+            <div>
+              <label class="block text-gray-400 font-semibold mb-1 text-xs">SMTP Secure Encryption</label>
+              <select name="smtp_secure" class="w-full bg-brandBlack border border-white/10 rounded-xl p-2.5 text-white focus:outline-none focus:border-brandGreen text-xs">
+                <option value="tls" <?php echo getSetting('smtp_secure') === 'tls' ? 'selected' : ''; ?>>TLS (Recommended)</option>
+                <option value="ssl" <?php echo getSetting('smtp_secure') === 'ssl' ? 'selected' : ''; ?>>SSL</option>
+                <option value="none" <?php echo getSetting('smtp_secure') === 'none' ? 'selected' : ''; ?>>None</option>
+              </select>
+            </div>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <label class="block text-gray-400 font-semibold mb-1 text-xs">SMTP Username / Email</label>
+              <input type="email" name="smtp_username" class="w-full bg-brandBlack border border-white/10 rounded-xl px-3 py-2.5 text-white text-xs focus:outline-none focus:border-brandGreen" value="<?php echo htmlspecialchars(getSetting('smtp_username', '')); ?>" placeholder="e.g. your-email@gmail.com">
+            </div>
+            <div>
+              <label class="block text-gray-400 font-semibold mb-1 text-xs">SMTP Password / App Password</label>
+              <input type="password" name="smtp_password" class="w-full bg-brandBlack border border-white/10 rounded-xl px-3 py-2.5 text-white text-xs focus:outline-none focus:border-brandGreen" value="<?php echo htmlspecialchars(getSetting('smtp_password', '')); ?>" placeholder="••••••••">
+            </div>
+          </div>
+        </div>
+
+        <!-- Google OAuth Config -->
+        <div class="space-y-4 pt-4">
+          <h3 class="text-sm font-bold uppercase tracking-wider text-[#8DC63F] border-b border-white/5 pb-2">Google OAuth Credentials</h3>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <label class="block text-gray-400 font-semibold mb-1 text-xs">Google Client ID</label>
+              <input type="text" name="google_client_id" class="w-full bg-brandBlack border border-white/10 rounded-xl px-3 py-2.5 text-white text-xs focus:outline-none focus:border-brandGreen" value="<?php echo htmlspecialchars(getSetting('google_client_id', '')); ?>" placeholder="xxxxxxxx.apps.googleusercontent.com">
+            </div>
+            <div>
+              <label class="block text-gray-400 font-semibold mb-1 text-xs">Google Client Secret</label>
+              <input type="password" name="google_client_secret" class="w-full bg-brandBlack border border-white/10 rounded-xl px-3 py-2.5 text-white text-xs focus:outline-none focus:border-brandGreen" value="<?php echo htmlspecialchars(getSetting('google_client_secret', '')); ?>" placeholder="••••••••">
+            </div>
+          </div>
+        </div>
+
+        <div class="flex justify-end pt-4">
+          <button type="submit" class="px-6 py-3 bg-brandGreen hover:bg-brandDarkGreen text-brandBlack font-extrabold text-xs rounded-xl shadow-lg shadow-brandGreen/20">Save System Settings</button>
+        </div>
+      </form>
+
+      <!-- Google Cloud Setup Documentation -->
+      <div class="bg-white p-8 rounded-3xl border border-gray-200 text-left space-y-4">
+        <h3 class="text-gray-800 font-extrabold text-lg font-['Outfit'] flex items-center gap-2">
+          <i class="fa-brands fa-google text-blue-600"></i> Google OAuth Integration Setup Guide
+        </h3>
+        <p class="text-xs text-gray-600">Follow these steps in Google Cloud Console to set up authentication:</p>
+        <ol class="list-decimal pl-5 text-xs text-gray-600 space-y-2">
+          <li>Go to the <a href="https://console.cloud.google.com/" target="_blank" class="text-brandGreen hover:underline font-bold">Google Cloud Console</a> and create or select a project.</li>
+          <li>Navigate to <strong>APIs & Services &gt; OAuth consent screen</strong>. Configure the consent screen as an <strong>External</strong> app type. Add name, logo, developer email, and authorized domains.</li>
+          <li>Navigate to <strong>Credentials</strong>. Click <strong>+ Create Credentials &gt; OAuth client ID</strong>.</li>
+          <li>Select <strong>Web application</strong> as the Application type. Name it <em>Yuvalay MakerSpace Web</em>.</li>
+          <li>Under <strong>Authorized JavaScript Origins</strong>, add the current host URLs:
+            <ul class="list-disc pl-5 mt-1 font-mono text-[11px] text-gray-700 bg-gray-50 p-2 rounded">
+              <li>http://localhost</li>
+              <li>http://127.0.0.1:8000</li>
+              <li>http://127.0.0.1</li>
+            </ul>
+          </li>
+          <li>Under <strong>Authorized Redirect URIs</strong>, add:
+            <ul class="list-disc pl-5 mt-1 font-mono text-[11px] text-gray-700 bg-gray-50 p-2 rounded">
+              <li>http://localhost/login.php</li>
+              <li>http://127.0.0.1:8000/login.php</li>
+            </ul>
+          </li>
+          <li>Click <strong>Create</strong>. Copy the generated <strong>Client ID</strong> and <strong>Client Secret</strong>, paste them in the settings form above, and click <strong>Save System Settings</strong>.</li>
+        </ol>
       </div>
     </div>
 

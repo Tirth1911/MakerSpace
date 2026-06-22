@@ -16,16 +16,15 @@ if (empty($email)) {
 }
 
 // Calculate remaining seconds left on the current OTP
-$seconds_left = 600;
+$seconds_left = 300; // 5 minutes
 if ($conn) {
     try {
-        $stmt = $conn->prepare("SELECT created_at FROM email_verification WHERE email = :email");
+        $stmt = $conn->prepare("SELECT expires_at FROM email_verifications WHERE email = :email");
         $stmt->execute(['email' => $email]);
         $record = $stmt->fetch();
         if ($record) {
-            $created = strtotime($record['created_at']);
-            $elapsed = time() - $created;
-            $seconds_left = max(0, 600 - $elapsed);
+            $expires = strtotime($record['expires_at']);
+            $seconds_left = max(0, $expires - time());
         }
     } catch (Exception $e) {}
 }
@@ -64,8 +63,8 @@ if ($conn) {
           </div>
         </div>
 
-        <button type="submit" class="w-full text-center py-4 bg-[#8DC63F] hover:bg-[#73a11c] text-brandBlack font-extrabold text-xs rounded-xl shadow-lg shadow-brandGreen/15 transition-all">
-          Verify Email
+        <button type="submit" id="verifySubmitBtn" class="w-full text-center py-4 bg-[#8DC63F] hover:bg-[#73a11c] text-brandBlack font-extrabold text-xs rounded-xl shadow-lg shadow-brandGreen/15 transition-all flex items-center justify-center gap-2">
+          <span id="verifyBtnText">Verify Email</span>
         </button>
       </form>
 
@@ -73,12 +72,12 @@ if ($conn) {
       <div class="flex flex-col items-center justify-center gap-3 pt-2 text-xs border-t border-white/5">
         <!-- Countdown timer -->
         <div id="timerContainer" class="text-gray-400 font-semibold flex items-center gap-1.5">
-          <i class="fa-regular fa-clock text-brandGreen"></i> Code expires in <span id="countdownText" class="font-bold text-white">10:00</span>
+          <i class="fa-regular fa-clock text-brandGreen"></i> Code expires in <span id="countdownText" class="font-bold text-white">05:00</span>
         </div>
 
         <div class="flex items-center gap-2">
           <span class="text-gray-500">Didn't receive the email?</span>
-          <button id="resendOtpBtn" onclick="resendVerificationOtp()" disabled class="text-brandGreen hover:underline font-bold disabled:opacity-50 disabled:no-underline disabled:cursor-not-allowed">
+          <button id="resendOtpBtn" onclick="resendVerificationOtp()" class="text-brandGreen hover:underline font-bold disabled:opacity-50 disabled:no-underline disabled:cursor-not-allowed">
             Resend Code
           </button>
         </div>
@@ -94,6 +93,8 @@ if ($conn) {
     const countdownText = document.getElementById("countdownText");
     const resendBtn = document.getElementById("resendOtpBtn");
     const timerContainer = document.getElementById("timerContainer");
+    const verifySubmitBtn = document.getElementById("verifySubmitBtn");
+    const verifyBtnText = document.getElementById("verifyBtnText");
     let timerInterval;
 
     function formatTime(seconds) {
@@ -109,7 +110,8 @@ if ($conn) {
             return;
         }
 
-        resendBtn.disabled = true;
+        verifySubmitBtn.disabled = false;
+        timerContainer.className = "text-gray-400 font-semibold flex items-center gap-1.5";
         countdownText.innerText = formatTime(timeLeft);
 
         timerInterval = setInterval(() => {
@@ -119,11 +121,6 @@ if ($conn) {
                 handleTimerExpiry();
             } else {
                 countdownText.innerText = formatTime(timeLeft);
-                // Enable resend button after 1 minute has elapsed (meaning 540 seconds or less left)
-                // to allow resending before the full 10-minute expiry
-                if (timeLeft <= 540) {
-                    resendBtn.disabled = false;
-                }
             }
         }, 1000);
     }
@@ -131,7 +128,11 @@ if ($conn) {
     function handleTimerExpiry() {
         countdownText.innerText = "Expired";
         timerContainer.className = "text-red-400 font-semibold flex items-center gap-1.5";
-        resendBtn.disabled = false;
+        verifySubmitBtn.disabled = true;
+        
+        const errDiv = document.getElementById("verifyError");
+        errDiv.innerText = "Verification code expired. Please request a new OTP.";
+        errDiv.classList.remove("hidden");
     }
 
     // Submit handler
@@ -144,6 +145,10 @@ if ($conn) {
             
             errDiv.classList.add("hidden");
             succDiv.classList.add("hidden");
+            
+            // Loading spinner state
+            verifySubmitBtn.disabled = true;
+            verifyBtnText.innerHTML = '<i class="fa-solid fa-spinner animate-spin"></i> Verifying...';
 
             const formData = new FormData(verifyForm);
 
@@ -153,6 +158,9 @@ if ($conn) {
             })
             .then(res => res.json())
             .then(data => {
+                verifySubmitBtn.disabled = false;
+                verifyBtnText.innerText = "Verify Email";
+                
                 if (data.status === "success") {
                     succDiv.innerText = data.message;
                     succDiv.classList.remove("hidden");
@@ -160,8 +168,8 @@ if ($conn) {
                     clearInterval(timerInterval);
 
                     setTimeout(() => {
-                        window.location.href = "/login.php?verified=1";
-                    }, 2000);
+                        window.location.href = data.redirect || "/my-registrations.php";
+                    }, 1500);
                 } else {
                     errDiv.innerText = data.message;
                     errDiv.classList.remove("hidden");
@@ -169,6 +177,8 @@ if ($conn) {
             })
             .catch(err => {
                 console.error(err);
+                verifySubmitBtn.disabled = false;
+                verifyBtnText.innerText = "Verify Email";
                 errDiv.innerText = "Network connection error. Please try again.";
                 errDiv.classList.remove("hidden");
             });
@@ -182,13 +192,19 @@ if ($conn) {
         
         errDiv.classList.add("hidden");
         succDiv.classList.add("hidden");
+        
+        const originalBtnText = resendBtn.innerHTML;
         resendBtn.disabled = true;
+        resendBtn.innerHTML = '<i class="fa-solid fa-spinner animate-spin mr-1"></i> Sending...';
 
         fetch("/api.php?action=resend-otp", {
             method: "POST"
         })
         .then(res => res.json())
         .then(data => {
+            resendBtn.disabled = false;
+            resendBtn.innerHTML = originalBtnText;
+            
             if (data.status === "success") {
                 let msg = data.message;
                 if (data.otp_fallback) {
@@ -197,21 +213,20 @@ if ($conn) {
                 succDiv.innerText = msg;
                 succDiv.classList.remove("hidden");
                 
-                // Reset timer back to 10 minutes
-                timeLeft = 600;
-                timerContainer.className = "text-gray-400 font-semibold flex items-center gap-1.5";
+                // Reset timer back to 5 minutes
+                timeLeft = 300;
                 startTimer();
             } else {
                 errDiv.innerText = data.message;
                 errDiv.classList.remove("hidden");
-                resendBtn.disabled = false;
             }
         })
         .catch(err => {
             console.error(err);
+            resendBtn.disabled = false;
+            resendBtn.innerHTML = originalBtnText;
             errDiv.innerText = "Network connection error. Please try again.";
             errDiv.classList.remove("hidden");
-            resendBtn.disabled = false;
         });
     }
 
